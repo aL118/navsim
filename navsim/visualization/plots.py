@@ -4,6 +4,7 @@ from typing import Any, Callable, List, Tuple
 import matplotlib.pyplot as plt
 from PIL import Image
 from tqdm import tqdm
+import numpy as np
 
 from navsim.agents.abstract_agent import AbstractAgent
 from navsim.common.dataclasses import Scene
@@ -236,6 +237,44 @@ def frame_plot_to_gif(
     images[0].save(file_name, save_all=True, append_images=images[1:], duration=duration, loop=0)
 
 
+def frame_plot_to_mp4(
+    file_name: str,
+    callable_frame_plot: Callable[[Scene, int], Tuple[plt.Figure, Any]],
+    scene: Scene,
+    frame_indices: List[int],
+    fps: int = 10,
+) -> None:
+    """
+    Saves a frame-wise plotting function as MP4 video
+    :param callable_frame_plot: callable to plot a single frame
+    :param scene: navsim scene dataclass
+    :param frame_indices: list of indices
+    :param file_name: file path for saving video
+    :param fps: frames per second, defaults to 10
+    """
+    import cv2
+
+    images = frame_plot_to_pil(callable_frame_plot, scene, frame_indices)
+
+    if len(images) == 0:
+        return
+
+    # Get dimensions from first image
+    width, height = images[0].size
+
+    # Initialize video writer
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out = cv2.VideoWriter(file_name, fourcc, fps, (width, height))
+
+    # Write frames
+    for img in images:
+        # Convert PIL image to OpenCV format (RGB to BGR)
+        frame = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+        out.write(frame)
+
+    out.release()
+
+
 def concat_scenes_to_gif_with_labels(
     file_name: str,
     callable_frame_plot: Callable[[Scene, int], Tuple[plt.Figure, Any]],
@@ -272,3 +311,35 @@ def concat_scenes_to_gif_with_labels(
             plt.close(fig)
 
     images[0].save(file_name, save_all=True, append_images=images[1:], duration=duration, loop=0)
+
+
+def plot_ego_camera_with_bev(scene: Scene, frame_idx: int, trajectory: Any = None) -> Tuple[plt.Figure, Any]:
+    """
+    Plots ego front camera view on top and BEV map on bottom in 2x1 grid.
+    Optionally overlays predicted/human trajectories on BEV.
+    :param scene: navsim scene dataclass
+    :param frame_idx: index of selected frame
+    :param trajectory: optional Trajectory dataclass to overlay on BEV
+    :return: figure and ax object of matplotlib
+    """
+    frame = scene.frames[frame_idx]
+    fig, ax = plt.subplots(2, 1, figsize=(12, 12), gridspec_kw={'height_ratios': [2, 1]})
+
+    # Top: Front camera view
+    add_camera_ax(ax[0], frame.cameras.cam_f0)
+    configure_ax(ax[0])
+
+    # Bottom: BEV with map
+    add_configured_bev_on_ax(ax[1], scene.map_api, frame)
+
+    # Optionally add trajectory overlay
+    if trajectory is not None:
+        add_trajectory_to_bev_ax(ax[1], trajectory, TRAJECTORY_CONFIG["agent"])
+
+    configure_bev_ax(ax[1])
+    configure_ax(ax[1])
+
+    fig.tight_layout()
+    fig.subplots_adjust(wspace=0.01, hspace=0.02, left=0.01, right=0.99, top=0.99, bottom=0.01)
+
+    return fig, ax

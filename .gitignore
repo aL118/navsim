@@ -1,3 +1,6 @@
+**/my_dump
+**/models
+
 # python
 *.pyc
 **/__pycache__/

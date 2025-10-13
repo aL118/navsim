@@ -57,6 +57,13 @@ The main branch contains the code for NAVSIM v2, used in the 2025 NAVSIM challen
 4. [License and citation](#licenseandcitation)
 5. [Other resources](#otherresources)
 
+## My Getting started
+- Go through download and install (I ran download_navtrain_hf.sh)
+- Download files from https://huggingface.co/autonomousvision/navsim_baselines/tree/main/transfuser into /models/transfuser
+- `sbatch -J metric_cache scripts/evaluation/run_metric_caching_slurm.sh`
+- `sbatch -J test scripts/evaluation/run_transfuser_pdm_score_evaluation.sh`
+- get visualizations: `sbatch -J test scripts/visualization/run_transfuser_viz.sh`
+
 ## Getting started <a name="gettingstarted"></a>
 
 - [Download and installation](docs/install.md)

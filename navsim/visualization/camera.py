@@ -21,7 +21,12 @@ def add_camera_ax(ax: plt.Axes, camera: Camera) -> plt.Axes:
     :param camera: navsim camera dataclass
     :return: ax object with image
     """
-    ax.imshow(camera.image)
+    if camera.image is not None:
+        ax.imshow(camera.image)
+    else:
+        # Display a blank/placeholder image if camera is not loaded
+        ax.text(0.5, 0.5, 'No Camera Data', ha='center', va='center', transform=ax.transAxes)
+        ax.set_facecolor('black')
     return ax
 
 

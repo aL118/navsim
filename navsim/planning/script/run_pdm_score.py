@@ -118,9 +118,9 @@ def run_pdm_score(args: List[Dict[str, Union[List[str], DictConfig]]]) -> List[p
             score_row_stage_one["start_point_y"] = metric_cache.ego_state.rear_axle.y
             score_row_stage_one["ego_simulated_states"] = [ego_simulated_states]  # used for two-frames extended comfort
 
-        except Exception:
+        except Exception as e:
             logger.warning(f"----------- Agent failed for token {token}:")
-            traceback.print_exc()
+            logger.warning(traceback.format_exc())
             score_row_stage_one = pd.DataFrame([PDMResults.get_empty_results()])
             score_row_stage_one["valid"] = False
         score_row_stage_one["token"] = token
@@ -134,7 +134,11 @@ def run_pdm_score(args: List[Dict[str, Union[List[str], DictConfig]]]) -> List[p
     )
     scene_loader_tokens_stage_two = scene_loader.reactive_tokens_stage_two
 
-    tokens_to_evaluate_stage_two = list(set(scene_loader_tokens_stage_two) & set(metric_cache_loader.tokens))
+    # Handle case where reactive_tokens_stage_two is None
+    if scene_loader_tokens_stage_two is None:
+        tokens_to_evaluate_stage_two = []
+    else:
+        tokens_to_evaluate_stage_two = list(set(scene_loader_tokens_stage_two) & set(metric_cache_loader.tokens))
     for idx, (token) in enumerate(tokens_to_evaluate_stage_two):
         logger.info(
             f"Processing stage two reactive scenario {idx + 1} / {len(tokens_to_evaluate_stage_two)} in thread_id={thread_id}, node_id={node_id}"
@@ -172,9 +176,9 @@ def run_pdm_score(args: List[Dict[str, Union[List[str], DictConfig]]]) -> List[p
             score_row_stage_two["start_point_y"] = metric_cache.ego_state.rear_axle.y
             score_row_stage_two["ego_simulated_states"] = [ego_simulated_states]  # used for two-frames extended comfort
 
-        except Exception:
+        except Exception as e:
             logger.warning(f"----------- Agent failed for token {token}:")
-            traceback.print_exc()
+            logger.warning(traceback.format_exc())
             score_row_stage_two = pd.DataFrame([PDMResults.get_empty_results()])
             score_row_stage_two["valid"] = False
         score_row_stage_two["token"] = token
@@ -252,6 +256,13 @@ def calculate_individual_mapping_scores(
     all_group_scores = []
     stage1_group_scores = []
     stage2_group_scores = []
+
+    # Handle empty mappings case (non-two-stage evaluation)
+    if not all_mappings:
+        # Get score column names from DataFrame (excluding weight and token)
+        score_cols = [c for c in pdm_score_df.columns if c not in {"weight", "token"}]
+        empty_series = pd.Series([np.nan] * len(score_cols), index=score_cols)
+        return (empty_series, empty_series, empty_series)
 
     for (orig_token, prev_token), second_stage_pairs in all_mappings.items():
 
@@ -351,21 +362,38 @@ def main(cfg: DictConfig) -> None:
         logger.warning(f"Missing metric cache for {num_missing_metric_cache_tokens} tokens. Skipping these tokens.")
     if num_unused_metric_cache_tokens > 0:
         logger.warning(f"Unused metric cache for {num_unused_metric_cache_tokens} tokens. Skipping these tokens.")
+
+    # Limit number of scenarios if max_scenarios is specified
+    max_scenarios = cfg.get("max_scenarios", None)
+    if max_scenarios is not None and max_scenarios > 0:
+        original_count = len(tokens_to_evaluate)
+        tokens_to_evaluate = tokens_to_evaluate[:max_scenarios]
+        logger.info(f"Limiting evaluation to {len(tokens_to_evaluate)} scenarios (out of {original_count} available)")
+
     logger.info(f"Starting pdm scoring of {len(tokens_to_evaluate)} scenarios...")
+
+    # Filter tokens per log to only include tokens_to_evaluate
+    tokens_to_evaluate_set = set(tokens_to_evaluate)
     data_points = [
         {
             "cfg": cfg,
             "log_file": log_file,
-            "tokens": tokens_list,
+            "tokens": [t for t in tokens_list if t in tokens_to_evaluate_set],
         }
         for log_file, tokens_list in scene_loader.get_tokens_list_per_log().items()
+        if any(t in tokens_to_evaluate_set for t in tokens_list)  # Only include logs with relevant tokens
     ]
     score_rows: List[pd.DataFrame] = worker_map(worker, run_pdm_score, data_points)
 
     pdm_score_df = pd.concat(score_rows)
 
     try:
-        raw_mapping = cfg.train_test_split.reactive_all_mapping
+        # Use cfg.get to safely access reactive_all_mapping (may not exist for all splits)
+        raw_mapping = cfg.train_test_split.get("reactive_all_mapping", None)
+
+        if raw_mapping is None:
+            raise ValueError("No reactive_all_mapping found in train_test_split config")
+
         all_mappings: Dict[Tuple[str, str], List[Tuple[str, str]]] = {}
 
         for orig_token, prev_token, two_stage_pairs in raw_mapping:
@@ -378,11 +406,12 @@ def main(cfg: DictConfig) -> None:
         pdm_score_df = compute_final_scores(pdm_score_df)
         pseudo_closed_loop_valid = True
 
-    except Exception:
+    except Exception as e:
         logger.warning("----------- Failed to calculate pseudo closed-loop weights or comfort:")
-        traceback.print_exc()
+        logger.warning(traceback.format_exc())
         pdm_score_df["weight"] = 1.0
         pseudo_closed_loop_valid = False
+        all_mappings = {}  # Initialize empty mappings for fallback path
 
     num_sucessful_scenarios = pdm_score_df["valid"].sum()
     num_failed_scenarios = len(pdm_score_df) - num_sucessful_scenarios
@@ -399,6 +428,15 @@ def main(cfg: DictConfig) -> None:
             and c != "pdm_score"
         )
     ]
+
+    # In fallback path (no two-stage evaluation), "score" column doesn't exist yet
+    # Need to compute it from existing metrics
+    if "score" not in pdm_score_df.columns and pseudo_closed_loop_valid == False:
+        # Compute simple score from pdm_score (without two-stage comfort)
+        if "pdm_score" in pdm_score_df.columns:
+            pdm_score_df["score"] = pdm_score_df["pdm_score"]
+            if "score" not in score_cols:
+                score_cols.append("score")
 
     pcl_group_score, pcl_stage1_score, pcl_stage2_score = calculate_individual_mapping_scores(
         pdm_score_df[score_cols + ["token", "weight"]], all_mappings

@@ -310,7 +310,13 @@ class MetricCacheLoader:
         :return: dictionary of token and file path
         """
         metadata_dir = cache_path / "metadata"
-        metadata_file = [file for file in metadata_dir.iterdir() if ".csv" in str(file)][0]
+        # Look for the complete metadata file with absolute paths first
+        metadata_files = [file for file in metadata_dir.iterdir() if ".csv" in str(file)]
+
+        # Prefer files with "metric_cache_metadata" in the name (complete metadata with absolute paths)
+        preferred_files = [f for f in metadata_files if "metric_cache_metadata" in f.name]
+        metadata_file = preferred_files[0] if preferred_files else metadata_files[0]
+
         with open(str(metadata_file), "r") as f:
             cache_paths = f.read().splitlines()[1:]
         metric_cache_dict = {cache_path.split("/")[-2]: cache_path for cache_path in cache_paths}
