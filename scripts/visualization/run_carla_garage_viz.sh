@@ -1,18 +1,18 @@
 #!/bin/bash
 
-# SLURM script to evaluate transfuser on a small subset (100 scenarios)
+# SLURM script to generate simulator footage visualizations for CarlaGarage
 
-#SBATCH --job-name=metrics_subset
+#SBATCH --job-name=viz_carla_garage
 #SBATCH --output=/fs/nexus-projects/sim2real/aliu/navsim/my_dump/%x.out.%j
 #SBATCH --error=/fs/nexus-projects/sim2real/aliu/navsim/my_dump/%x.out.%j
 
 ## Resource allocation
-#SBATCH --mem=64gb
+#SBATCH --mem=64gb                                               # memory required by job; if unit is not specified MB will be assumed
 #SBATCH --gres=gpu:rtxa6000:1
 #SBATCH --ntasks=4
 
 ## Time and partition config
-#SBATCH --time=2:00:00
+#SBATCH --time=4:00:00
 #SBATCH --qos=medium
 #SBATCH --account=gamma
 #SBATCH --partition=gamma
@@ -30,20 +30,28 @@ export NAVSIM_EXP_ROOT="$HOME/navsim/exp"
 export NAVSIM_DEVKIT_ROOT="$HOME/navsim"
 export OPENSCENE_DATA_ROOT="$HOME/navsim/dataset"
 
-# Use navmini for a smaller subset (or specify max_scenarios)
-TRAIN_TEST_SPLIT=navtrain
+TRAIN_TEST_SPLIT=navtrain  # Use test split for real-world performance
 CHECKPOINT=/fs/nexus-projects/sim2real/aliu/navsim/models/carla_garage/pretrained_baseline_0030_0.ckpt
 CACHE_PATH=/fs/nexus-projects/sim2real/aliu/navsim/metric_cache
+EXPERIMENT="carla_garage_visualizations"
+VIZ_OUTPUT_DIR=/fs/nexus-projects/sim2real/aliu/navsim/my_dump/$EXPERIMENT
+MAX_VIZ_SCENARIOS=10
+VIZ_FPS=10
+VIZ_FORMAT=gif
 
-# Use run_pdm_score.py (the evaluation script without visualization)
-python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_pdm_score.py \
+python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_pdm_score_with_viz.py \
 train_test_split=$TRAIN_TEST_SPLIT \
-agent=transfuser_agent \
+agent=carla_garage_agent \
 worker=single_machine_thread_pool \
 agent.checkpoint_path=$CHECKPOINT \
-experiment_name=carla_garage_subset \
+train_test_split.scene_filter.num_history_frames=20 \
+train_test_split.scene_filter.num_future_frames=20 \
+experiment_name=$EXPERIMENT \
 metric_cache_path=$CACHE_PATH \
-+max_scenarios=100
++viz_output_dir=$VIZ_OUTPUT_DIR \
++max_viz_scenarios=$MAX_VIZ_SCENARIOS \
++viz_fps=$VIZ_FPS \
++viz_format=$VIZ_FORMAT \
 
 # Usage:
-# sbatch -J metrics_subset scripts/evaluation/run_transfuser_metrics_subset.sh
+# sbatch scripts/visualization/run_carla_garage_viz.sh

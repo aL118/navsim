@@ -30,3 +30,5 @@ dataset
 
 # running scripts
 scripts_dev/*
+
+**/metric_cache

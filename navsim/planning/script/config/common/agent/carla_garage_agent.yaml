@@ -1,0 +1,15 @@
+_target_: navsim.agents.carla_garage.carla_garage_agent.CarlaGarageAgent
+_convert_: 'all'
+
+trajectory_sampling:
+    _target_: nuplan.planning.simulation.trajectory.trajectory_sampling.TrajectorySampling
+    _convert_: 'all'
+    time_horizon: 4
+    interval_length: 0.5
+config:
+  _target_: navsim.agents.carla_garage.carla_garage_config.CarlaGarageConfig
+  _convert_: 'all'
+  # Config now matches checkpoint defaults - no overrides needed
+checkpoint_path: null
+lr: 1e-4
+strict_checkpoint_loading: true  # Set to false for modified models with extra/missing keys
