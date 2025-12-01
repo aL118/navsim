@@ -46,7 +46,7 @@ class CarlaGarageAgent(AbstractAgent):
 
         self._checkpoint_path = checkpoint_path
         self._strict_checkpoint_loading = strict_checkpoint_loading
-        self._carla_garage_model = LidarCenterNet(config)
+        self._carla_garage_model = LidarCenterNet(config, trajectory_sampling)
 
     def name(self) -> str:
         """Inherited, see superclass."""
@@ -72,7 +72,7 @@ class CarlaGarageAgent(AbstractAgent):
             state_dict = {f"_carla_garage_model.{key}": value for key, value in state_dict.items()}
 
         # Use strict=False for modified models with extra/missing keys
-        self.load_state_dict(state_dict, strict=self._strict_checkpoint_loading)
+        self.load_state_dict(state_dict, strict=False)
 
 
     def get_sensor_config(self) -> SensorConfig:
@@ -98,90 +98,9 @@ class CarlaGarageAgent(AbstractAgent):
         """Inherited, see superclass."""
         return [TransfuserFeatureBuilder(config=self._config)]
 
-    # TODO: use self._transfuser_model(features)
     def forward(self, features: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         """Inherited, see superclass."""
-        # Unpack features dictionary to match LidarCenterNet.forward() signature
-        rgb = features["camera_feature"].unsqueeze(0) if features["camera_feature"].dim() == 3 else features["camera_feature"]
-        lidar_bev = features["lidar_feature"].unsqueeze(0) if features["lidar_feature"].dim() == 3 else features["lidar_feature"]
-        status = features["status_feature"]
-
-        # status_feature is concatenation of [driving_command (1D), ego_velocity (2D), ego_acceleration (2D)]
-        # Total: 5D
-        if status.dim() == 1:
-            driving_cmd = status[0].long()  # scalar command index
-            ego_velocity_2d = status[1:3]  # 2D velocity vector
-        else:
-            driving_cmd = status[:, 0].long()  # (batch,) command indices
-            ego_velocity_2d = status[:, 1:3]  # (batch, 2) velocity vectors
-
-        # Convert 2D velocity to scalar speed
-        ego_vel = torch.norm(ego_velocity_2d, dim=-1, keepdim=True)  # (batch, 1) or (1,)
-        if ego_vel.dim() == 0:
-            ego_vel = ego_vel.unsqueeze(0).unsqueeze(0)
-        elif ego_vel.dim() == 1:
-            ego_vel = ego_vel.unsqueeze(0)
-
-        # One-hot encode the driving command (assuming 6 classes: VOID, LEFT, RIGHT, STRAIGHT, LANEFOLLOW, CHANGELANELEFT, CHANGELANERIGHT)
-        # But nuPlan uses 4 classes, so let's use 6 to match CARLA
-        num_commands = 6
-        command = torch.nn.functional.one_hot(driving_cmd, num_classes=num_commands).float()
-        if command.dim() == 1:
-            command = command.unsqueeze(0)
-
-        # TODO: Compute actual target_point from route/waypoints
-        # For now, use a dummy target point (straight ahead)
-        batch_size = rgb.shape[0]
-        target_point = torch.zeros((batch_size, 2), device=rgb.device, dtype=rgb.dtype)
-        target_point[:, 0] = 10.0  # 10 meters ahead in x direction
-
-        # Model returns: (pred_wp, pred_target_speed, pred_checkpoint, pred_semantic, pred_bev_semantic,
-        #                 pred_depth, pred_bounding_box, attention_weights, pred_wp_1, selected_path)
-        model_outputs = self._carla_garage_model(rgb, lidar_bev, target_point, ego_vel, command)
-
-        # Extract predictions
-        pred_wp, pred_target_speed, pred_checkpoint, pred_semantic, pred_bev_semantic, \
-            pred_depth, pred_bounding_box, attention_weights, pred_wp_1, selected_path = model_outputs
-
-        # Convert to expected dictionary format
-        # Since use_wp_gru=False, pred_wp is None. Use pred_checkpoint as trajectory.
-        trajectory = pred_checkpoint if pred_checkpoint is not None else pred_wp
-
-        # Ensure trajectory matches the expected number of poses from trajectory_sampling
-        # Model predicts predict_checkpoint_len=10, but trajectory_sampling expects num_poses=8
-        num_expected_poses = self._trajectory_sampling.num_poses
-        if trajectory is not None and trajectory.shape[1] != num_expected_poses:
-            # Slice to match expected number of poses
-            trajectory = trajectory[:, :num_expected_poses, :]
-
-        # Add heading dimension to trajectory (model outputs only x, y)
-        # Compute heading from consecutive waypoint positions
-        if trajectory is not None and trajectory.shape[-1] == 2:
-            batch_size = trajectory.shape[0]
-            num_poses = trajectory.shape[1]
-
-            # Compute heading from position differences
-            # For each waypoint, compute heading as arctan2(dy, dx) to next waypoint
-            headings = torch.zeros((batch_size, num_poses, 1), device=trajectory.device, dtype=trajectory.dtype)
-
-            # Compute headings from consecutive position differences
-            for i in range(num_poses - 1):
-                dx = trajectory[:, i + 1, 0] - trajectory[:, i, 0]
-                dy = trajectory[:, i + 1, 1] - trajectory[:, i, 1]
-                headings[:, i, 0] = torch.atan2(dy, dx)
-
-            # For the last waypoint, use the same heading as the second-to-last
-            headings[:, -1, 0] = headings[:, -2, 0]
-
-            # Concatenate (x, y, heading)
-            trajectory = torch.cat([trajectory, headings], dim=-1)
-
-        predictions = {
-            "trajectory": trajectory,
-            "target_speed": pred_target_speed,
-        }
-
-        return predictions
+        return self._carla_garage_model(features)
 
     def compute_loss(
         self,

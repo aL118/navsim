@@ -31,9 +31,9 @@ export NAVSIM_DEVKIT_ROOT="$HOME/navsim"
 export OPENSCENE_DATA_ROOT="$HOME/navsim/dataset"
 
 TRAIN_TEST_SPLIT=navtrain  # Use test split for real-world performance
-CHECKPOINT=/fs/nexus-projects/sim2real/aliu/navsim/models/carla_garage/pretrained_baseline_0030_0.ckpt
+CHECKPOINT=/fs/nexus-scratch/aliu1237/carla_garage_clone/logs/sim2drive_stage2_19_30/model_0029.pth
 CACHE_PATH=/fs/nexus-projects/sim2real/aliu/navsim/metric_cache
-EXPERIMENT="carla_garage_visualizations"
+EXPERIMENT="carla_garage_sim2real_visualizations"
 VIZ_OUTPUT_DIR=/fs/nexus-projects/sim2real/aliu/navsim/my_dump/$EXPERIMENT
 MAX_VIZ_SCENARIOS=10
 VIZ_FPS=10

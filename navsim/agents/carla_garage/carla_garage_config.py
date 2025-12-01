@@ -98,28 +98,28 @@ class CarlaGarageConfig:
     backbone: str = "transFuser"
 
     # Lateral PID controller
-    lateral_k_p: float = 0.7
-    lateral_k_d: float = 0.1
-    lateral_k_i: float = 0.0
-    lateral_speed_scale: float = 1.8
-    lateral_speed_offset: float = -4.0
-    lateral_default_lookahead: float = 2.0
-    lateral_speed_threshold: float = 10.0
-    lateral_n: int = 20
+    lateral_k_p: float = 3.118357247806046
+    lateral_k_d: float = 1.3782508892109167
+    lateral_k_i: float = 0.6406067986034124
+    lateral_speed_scale: float = 0.9755321901954155
+    lateral_speed_offset: float = 1.9152884533402488
+    lateral_default_lookahead: float = 24
+    lateral_speed_threshold: float = 23.150102938235136
+    lateral_n: int = 6
 
     # Turn/Speed PID controllers
     turn_kp: float = 1.25
     turn_ki: float = 0.75
     turn_kd: float = 0.3
-    turn_n: int = 40
-    speed_kp: float = 5.0
-    speed_ki: float = 0.5
-    speed_kd: float = 1.0
-    speed_n: int = 40
+    turn_n: int = 20
+    speed_kp: float = 1.75
+    speed_ki: float = 1.0
+    speed_kd: float = 2.0
+    speed_n: int = 20
 
     # Longitudinal control
-    longitudinal_max_acceleration: float = 1.9
-    longitudinal_params: tuple = (1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.1)
+    longitudinal_max_acceleration: float = 1.89
+    longitudinal_params: tuple = (1.1990342347353184, -0.8057602384167799, 1.710818710950062, 0.921890257450335, 1.556497522998393, -0.7013479734904027, 1.031266635497984)
 
     # Target speed / weights
     target_speeds: tuple = (0.0, 4.0, 8.0, 10.0, 13.88888888, 16.0, 17.77777777, 20.0)  # 8 classes to match checkpoint
@@ -139,7 +139,7 @@ class CarlaGarageConfig:
     pred_len: int = 4
     wp_dilation: int = 1
     multi_wp_output: bool = False
-    learn_origin: bool = False
+    learn_origin: bool = True
     num_decoder_heads: int = 8
     num_transformer_decoder_layers: int = 6
 
@@ -176,13 +176,13 @@ class CarlaGarageConfig:
     bev_grid_height_downsample_factor: int = 1
 
     # Aim / brake / clip settings
-    aim_distance_fast: float = 4.0
-    aim_distance_slow: float = 2.0
-    aim_distance_threshold: float = 10.0
+    aim_distance_fast = 3.0
+    aim_distance_slow = 2.25
+    aim_distance_threshold: float = 5.5
     brake_speed: float = 0.4
     brake_ratio: float = 1.1
-    clip_delta: float = 0.25
-    clip_throttle: float = 0.75
+    clip_delta: float = 1.0
+    clip_throttle: float = 1.0
 
     # Plant settings
     plant_max_speed_pred: float = 20.0
@@ -191,14 +191,14 @@ class CarlaGarageConfig:
     plant_precision_speed: float = 0.05
 
     # Camera/lidar settings
-    camera_fov: float = 100.0
-    camera_pos: tuple = (1.3, 0.0, 2.3)
+    camera_fov: float = 110
+    camera_pos: tuple = (-1.5, 0.0, 2.0)
     camera_rot_0: tuple = (0.0, 0.0, 0.0)
-    lidar_pos: tuple = (1.3, 0.0, 2.5)
-    lidar_rot: tuple = (0.0, 0.0, 0.0)
+    lidar_pos: tuple = (0.0, 0.0, 2.5)
+    lidar_rot: tuple = (0.0, 0.0, -90.0)
     carla_fps: int = 20
-    ego_extent_x: float = 2.4
-    ego_extent_y: float = 1.0
+    ego_extent_x: float = 2.4508416652679443
+    ego_extent_y: float = 1.0641621351242065
 
     # Cropping
     crop_image: bool = True  # Matches checkpoint
@@ -212,8 +212,8 @@ class CarlaGarageConfig:
     max_x: float = 32.0
     min_y: float = -32.0
     max_y: float = 32.0
-    min_z_projection: float = -3.0
-    max_z_projection: float = 1.0
+    min_z_projection: float = -10
+    max_z_projection: float = 14
 
     # Misc
     seq_len: int = 1

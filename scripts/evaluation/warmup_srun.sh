@@ -1,14 +1,5 @@
 #!/bin/bash
 
-# Script to evaluate transfuser on a small subset (100 scenarios)
-# Run this with srun, e.g.:
-#   srun --mem=64gb --gres=gpu:rtxa6000:1 --ntasks=4 --time=2:00:00 \
-#        --qos=medium --account=gamma --partition=gamma \
-#        scripts/evaluation/run_transfuser_metrics_subset_srun.sh
-#
-# Or if you already have an allocation (via salloc):
-#   ./scripts/evaluation/run_transfuser_metrics_subset_srun.sh
-
 eval "$(conda shell.bash hook)"
 conda activate navsim
 
@@ -25,18 +16,18 @@ export OPENSCENE_DATA_ROOT="$HOME/navsim/dataset"
 # Use navmini for a smaller subset (or specify max_scenarios)
 TRAIN_TEST_SPLIT=warmup_two_stage  # Two-stage eval for EPDMS (camera-only)
 
-CHECKPOINT=/fs/nexus-projects/sim2real/aliu/navsim/models/transfuser/transfuser_seed_0.ckpt
+# CHECKPOINT=/fs/nexus-projects/sim2real/aliu/navsim/models/transfuser/transfuser_seed_0.ckpt
 # CHECKPOINT=/fs/nexus-projects/sim2real/aliu/navsim/models/carla_garage/pretrained_baseline_0030_0.ckpt
 # CHECKPOINT=/fs/nexus-scratch/aliu1237/carla_garage_clone/logs/sim2drive_mixdata_stage2/model_0029.pth
 # CHECKPOINT=/fs/nexus-scratch/aliu1237/carla_garage_clone/logs/sim2drive_stage2_19_30/model_0029.pth
-# CHECKPOINT=/fs/nexus-scratch/aliu1237/carla_garage_clone/logs/BASELINE/model_0029.pth
+CHECKPOINT=/fs/nexus-scratch/aliu1237/carla_garage_clone/logs/BASELINE/model_0029.pth
 CACHE_PATH=/fs/nexus-projects/sim2real/aliu/navsim/metric_cache_warmup
 # transfuser_agent
 # Use run_pdm_score.py (the evaluation script without visualization)
 python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_pdm_score.py \
   train_test_split=$TRAIN_TEST_SPLIT \
-  agent=transfuser_agent \
-  agent.config.latent=true \
+  agent=carla_garage_agent \
+  +agent.config.latent=true \
   worker=single_machine_thread_pool \
   agent.checkpoint_path=$CHECKPOINT \
   experiment_name=bash \
@@ -44,4 +35,3 @@ python $NAVSIM_DEVKIT_ROOT/navsim/planning/script/run_pdm_score.py \
   original_sensor_path=$OPENSCENE_DATA_ROOT/warmup_two_stage/sensor_blobs \
   synthetic_sensor_path=$OPENSCENE_DATA_ROOT/warmup_two_stage/sensor_blobs \
   synthetic_scenes_path=$OPENSCENE_DATA_ROOT/warmup_two_stage/synthetic_scene_pickles \
-  # +max_scenarios=50  # Removed to evaluate all warmup scenarios (~220)

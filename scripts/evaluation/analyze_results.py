@@ -11,6 +11,7 @@ Example:
 
 import sys
 import pandas as pd
+import numpy as np
 from pathlib import Path
 
 
@@ -26,73 +27,85 @@ def analyze_results(csv_path: str):
     # Filter to only scenario rows (exclude summary rows)
     scenario_df = df[~df['token'].str.contains('extended_pdm_score', na=False)]
 
-    print("=" * 60)
-    print("PDM SCORE EVALUATION SUMMARY")
-    print("=" * 60)
-    print(f"\nResults file: {csv_path}")
+    # Separate stage-one and stage-two scenarios
+    stage_one_df = scenario_df[scenario_df['no_at_fault_collisions_stage_one'].notna()]
+    stage_two_df = scenario_df[scenario_df['no_at_fault_collisions_stage_two'].notna()]
 
-    # Count total scenarios
-    total = len(scenario_df)
-    print(f"\nTotal scenarios evaluated: {total}")
+    print("=" * 80)
+    print("PDM SCORE RESULTS")
+    print("=" * 80)
+    print(f"File: {csv_path}\n")
 
-    # Count valid scenarios (no crashes)
-    valid = scenario_df['valid'].sum()
-    failed = total - valid
-    print(f"Valid scenarios (no crashes): {valid}")
-    print(f"Failed scenarios (crashed): {failed}")
+    # EPDMS Scores (most important)
+    print("EXTENDED PDM SCORES (EPDMS):")
 
-    # Count scenarios with score > 0
-    scored = (scenario_df['score'] > 0).sum()
-    zero_score = (scenario_df['score'] == 0).sum()
-    print(f"\nScenarios with score > 0: {scored}")
-    print(f"Scenarios with score = 0: {zero_score}")
+    # Check for official EPDMS scores
+    epdms_combined_row = df[df['token'] == 'extended_pdm_score_combined']
 
-    # Average score
-    avg_score = scenario_df['score'].mean()
-    print(f"\nAverage score (all scenarios): {avg_score:.4f}")
+    if len(epdms_combined_row) > 0 and epdms_combined_row.iloc[0]['valid']:
+        # Official EPDMS available
+        epdms_stage_one_row = df[df['token'] == 'extended_pdm_score_stage_one']
+        epdms_stage_two_row = df[df['token'] == 'extended_pdm_score_stage_two']
 
-    # Average score (excluding zeros)
-    if scored > 0:
-        avg_score_nonzero = scenario_df[scenario_df['score'] > 0]['score'].mean()
-        print(f"Average score (non-zero only): {avg_score_nonzero:.4f}")
+        if len(epdms_stage_one_row) > 0 and not pd.isna(epdms_stage_one_row.iloc[0]['score']):
+            print(f"  Stage-One:  {epdms_stage_one_row.iloc[0]['score']:.4f}")
+        if len(epdms_stage_two_row) > 0 and not pd.isna(epdms_stage_two_row.iloc[0]['score']):
+            print(f"  Stage-Two:  {epdms_stage_two_row.iloc[0]['score']:.4f}")
+        print(f"  Combined:   {epdms_combined_row.iloc[0]['score']:.4f}")
+    else:
+        # Estimate EPDMS
+        print("  (Estimated - true EPDMS requires reactive mapping weights)")
 
-    # Check which multiplicative metrics caused failures
-    print("\n" + "=" * 60)
-    print("FAILURE ANALYSIS (for scenarios with score = 0)")
-    print("=" * 60)
+        if len(stage_one_df) > 0:
+            stage_one_scores = stage_one_df[stage_one_df['valid'] == True]['score'].dropna()
+            if len(stage_one_scores) > 0:
+                print(f"  Stage-One:  {stage_one_scores.mean():.4f} (n={len(stage_one_scores)})")
 
+        if len(stage_two_df) > 0:
+            stage_two_scores = stage_two_df[stage_two_df['valid'] == True]['score'].dropna()
+            if len(stage_two_scores) > 0:
+                print(f"  Stage-Two:  {stage_two_scores.mean():.4f} (n={len(stage_two_scores)})")
+
+        all_scores = scenario_df[scenario_df['valid'] == True]['score'].dropna()
+        if len(all_scores) > 0:
+            print(f"  Combined:   {all_scores.mean():.4f} (n={len(all_scores)})")
+
+    # Average scores
+    print(f"\nAVERAGE SCORE: {scenario_df['score'].mean():.4f}")
+    valid_scenarios = scenario_df[scenario_df['valid'] == True]
+    if len(valid_scenarios) > 0:
+        print(f"  (Valid scenarios only): {valid_scenarios['score'].mean():.4f}")
+
+    # Count infractions (scenarios with zero score)
+    print(f"\nINFRACTIONS (Zero Score Scenarios): {(scenario_df['score'] == 0).sum()}/{len(scenario_df)}")
+
+    # Show which metrics caused failures
     zero_scenarios = scenario_df[scenario_df['score'] == 0]
-    print(f"\nTotal scenarios with score = 0: {len(zero_scenarios)}")
-
     if len(zero_scenarios) > 0:
-        # Count failures by metric
-        print("\nMultiplicative metric failures:")
-        print(f"  No at-fault collisions: {(zero_scenarios['no_at_fault_collisions_stage_one'] == 0).sum()} failures")
-        print(f"  Drivable area compliance: {(zero_scenarios['drivable_area_compliance_stage_one'] == 0).sum()} failures")
-        print(f"  Driving direction compliance: {(zero_scenarios['driving_direction_compliance_stage_one'] < 1).sum()} failures")
-        print(f"  Traffic light compliance: {(zero_scenarios['traffic_light_compliance_stage_one'] == 0).sum()} failures")
-        print(f"  Time to collision: {(zero_scenarios['time_to_collision_within_bound_stage_one'] == 0).sum()} failures")
+        zero_stage_two = zero_scenarios[zero_scenarios['no_at_fault_collisions_stage_two'].notna()]
 
-    # Score distribution
-    print("\n" + "=" * 60)
-    print("SCORE DISTRIBUTION")
-    print("=" * 60)
-    print(f"\nMin score: {scenario_df['score'].min():.4f}")
-    print(f"Max score: {scenario_df['score'].max():.4f}")
-    print(f"Median score: {scenario_df['score'].median():.4f}")
-    print(f"25th percentile: {scenario_df['score'].quantile(0.25):.4f}")
-    print(f"75th percentile: {scenario_df['score'].quantile(0.75):.4f}")
+        if len(zero_stage_two) > 0:
+            print(f"  Main failure causes (stage-two):")
+            collisions = (zero_stage_two['no_at_fault_collisions_stage_two'] == 0).sum()
+            drivable = (zero_stage_two['drivable_area_compliance_stage_two'] == 0).sum()
+            ttc = (zero_stage_two['time_to_collision_within_bound_stage_two'] == 0).sum()
 
-    # Check if two-stage evaluation was performed
-    summary_row = df[df['token'] == 'extended_pdm_score_combined']
-    if len(summary_row) > 0 and summary_row.iloc[0]['valid']:
-        print("\n" + "=" * 60)
-        print("EXTENDED PDM SCORE (TWO-STAGE)")
-        print("=" * 60)
-        combined_score = summary_row.iloc[0]['score']
-        print(f"\nFinal extended PDM score: {combined_score:.4f}")
+            if collisions > 0:
+                print(f"    Collisions: {collisions}")
+            if drivable > 0:
+                print(f"    Off-road: {drivable}")
+            if ttc > 0:
+                print(f"    TTC violations: {ttc}")
 
-    print("\n" + "=" * 60)
+    # Summary stats
+    total = len(scenario_df)
+    valid = scenario_df['valid'].sum()
+    print(f"\nSUMMARY:")
+    print(f"  Total scenarios: {total} (stage-one: {len(stage_one_df)}, stage-two: {len(stage_two_df)})")
+    print(f"  Valid (no crash): {valid}/{total}")
+    print(f"  Failed (crashed): {total - valid}/{total}")
+
+    print("\n" + "=" * 80)
 
 
 if __name__ == "__main__":
@@ -100,178 +113,135 @@ if __name__ == "__main__":
     #     print(__doc__)
     #     sys.exit(1)
 
-    csv_path = '/fs/nexus-projects/sim2real/aliu/navsim/exp/bash/2025.11.27.18.49.48/2025.11.27.19.00.00.csv' # sys.argv[1]
+    csv_path = '/fs/nexus-projects/sim2real/aliu/navsim/exp/mixdata_sim2drive/2025.11.30.00.07.24/2025.11.30.00.17.05.csv' # sys.argv[1]
     analyze_results(csv_path)
 
-
 """
-transfuser
-============================================================
-PDM SCORE EVALUATION SUMMARY
-============================================================
+================================================================================
+FULL PDM SCORE RESULTS
+================================================================================
+File: /fs/nexus-projects/sim2real/aliu/navsim/exp/full_no_aug/2025.11.29.19.03.14/2025.11.29.19.14.21.csv
 
-Results file: /fs/nexus-projects/sim2real/aliu/navsim/exp/bash/2025.11.27.12.15.09/2025.11.27.12.26.11.csv
+EXTENDED PDM SCORES (EPDMS):
+  (Estimated - true EPDMS requires reactive mapping weights)
+  Stage-Two:  0.2194 (n=103)
+  Combined:   0.2194 (n=103)
 
-Total scenarios evaluated: 100
-Valid scenarios (no crashes): 100
-Failed scenarios (crashed): 0
+AVERAGE SCORE: 0.2194
+  (Valid scenarios only): 0.2194
 
-Scenarios with score > 0: 86
-Scenarios with score = 0: 14
+INFRACTIONS (Zero Score Scenarios): 71/111
+  Main failure causes (stage-two):
+    Collisions: 13
+    Off-road: 62
+    TTC violations: 16
 
-Average score (all scenarios): 0.7915
-Average score (non-zero only): 0.9203
+SUMMARY:
+  Total scenarios: 111 (stage-one: 0, stage-two: 103)
+  Valid (no crash): 103/111
+  Failed (crashed): 8/111
 
-============================================================
-FAILURE ANALYSIS (for scenarios with score = 0)
-============================================================
+================================================================================
 
-Total scenarios with score = 0: 14
+================================================================================
+SIM2DRIVE PDM SCORE RESULTS
+================================================================================
+File: /fs/nexus-projects/sim2real/aliu/navsim/exp/sim2drive_virtual_only/2025.11.29.19.14.36/2025.11.29.19.24.18.csv
 
-Multiplicative metric failures:
-  No at-fault collisions: 0 failures
-  Drivable area compliance: 2 failures
-  Driving direction compliance: 1 failures
-  Traffic light compliance: 0 failures
-  Time to collision: 1 failures
+EXTENDED PDM SCORES (EPDMS):
+  (Estimated - true EPDMS requires reactive mapping weights)
+  Stage-Two:  0.4883 (n=83)
+  Combined:   0.4883 (n=83)
 
-============================================================
-SCORE DISTRIBUTION
-============================================================
+AVERAGE SCORE: 0.4883
+  (Valid scenarios only): 0.4883
 
-Min score: 0.0000
-Max score: 1.0000
-Median score: 0.9182
-25th percentile: 0.8425
-75th percentile: 0.9845
+INFRACTIONS (Zero Score Scenarios): 27/91
+  Main failure causes (stage-two):
+    Collisions: 5
+    Off-road: 20
+    TTC violations: 5
 
-============================================================
+SUMMARY:
+  Total scenarios: 91 (stage-one: 0, stage-two: 83)
+  Valid (no crash): 83/91
+  Failed (crashed): 8/91
 
+================================================================================
 
-carla_garage
-============================================================
-PDM SCORE EVALUATION SUMMARY
-============================================================
+================================================================================
+MIXDATA PDM SCORE RESULTS
+================================================================================
+File: /fs/nexus-projects/sim2real/aliu/navsim/exp/sim2drive_virtual_only/2025.11.29.23.09.59/2025.11.29.23.19.45.csv
 
-Results file: /fs/nexus-projects/sim2real/aliu/navsim/exp/bash/2025.11.27.12.46.20/2025.11.27.12.55.29.csv
+EXTENDED PDM SCORES (EPDMS):
+  (Estimated - true EPDMS requires reactive mapping weights)
+  Stage-Two:  0.3392 (n=96)
+  Combined:   0.3392 (n=96)
 
-Total scenarios evaluated: 100
-Valid scenarios (no crashes): 100
-Failed scenarios (crashed): 0
+AVERAGE SCORE: 0.3392
+  (Valid scenarios only): 0.3392
 
-Scenarios with score > 0: 79
-Scenarios with score = 0: 21
+INFRACTIONS (Zero Score Scenarios): 48/103
+  Main failure causes (stage-two):
+    Collisions: 4
+    Off-road: 42
+    TTC violations: 4
 
-Average score (all scenarios): 0.6472
-Average score (non-zero only): 0.8193
+SUMMARY:
+  Total scenarios: 103 (stage-one: 0, stage-two: 96)
+  Valid (no crash): 96/103
+  Failed (crashed): 7/103
 
-============================================================
-FAILURE ANALYSIS (for scenarios with score = 0)
-============================================================
+================================================================================
+BASELINE PDM SCORE RESULTS
+================================================================================
+File: /fs/nexus-projects/sim2real/aliu/navsim/exp/full_no_aug/2025.11.29.22.55.34/2025.11.29.23.09.43.csv
 
-Total scenarios with score = 0: 21
+EXTENDED PDM SCORES (EPDMS):
+  (Estimated - true EPDMS requires reactive mapping weights)
+  Stage-Two:  0.2568 (n=120)
+  Combined:   0.2568 (n=120)
 
-Multiplicative metric failures:
-  No at-fault collisions: 8 failures
-  Drivable area compliance: 11 failures
-  Driving direction compliance: 1 failures
-  Traffic light compliance: 2 failures
-  Time to collision: 8 failures
+AVERAGE SCORE: 0.2568
+  (Valid scenarios only): 0.2568
 
-============================================================
-SCORE DISTRIBUTION
-============================================================
+INFRACTIONS (Zero Score Scenarios): 79/131
+  Main failure causes (stage-two):
+    Collisions: 27
+    Off-road: 57
+    TTC violations: 32
 
-Min score: 0.0000
-Max score: 1.0000
-Median score: 0.8037
-25th percentile: 0.5568
-75th percentile: 0.8619
+SUMMARY:
+  Total scenarios: 131 (stage-one: 0, stage-two: 120)
+  Valid (no crash): 120/131
+  Failed (crashed): 11/131
 
-============================================================
+================================================================================
 
+================================================================================
+MIX_SIMDRIVE SCORE RESULTS
+================================================================================
+File: /fs/nexus-projects/sim2real/aliu/navsim/exp/mixdata_sim2drive/2025.11.30.00.07.24/2025.11.30.00.17.05.csv
 
-sim2drive_mixdata
-============================================================
-PDM SCORE EVALUATION SUMMARY
-============================================================
+EXTENDED PDM SCORES (EPDMS):
+  (Estimated - true EPDMS requires reactive mapping weights)
+  Stage-Two:  0.3840 (n=61)
+  Combined:   0.3840 (n=61)
 
-Results file: /fs/nexus-projects/sim2real/aliu/navsim/exp/bash/sim2drive_mixdata/2025.11.27.15.11.43.csv
+AVERAGE SCORE: 0.3840
+  (Valid scenarios only): 0.3840
 
-Total scenarios evaluated: 100
-Valid scenarios (no crashes): 100
-Failed scenarios (crashed): 0
+INFRACTIONS (Zero Score Scenarios): 32/68
+  Main failure causes (stage-two):
+    Collisions: 17
+    Off-road: 15
+    TTC violations: 21
 
-Scenarios with score > 0: 64
-Scenarios with score = 0: 36
+SUMMARY:
+  Total scenarios: 68 (stage-one: 0, stage-two: 61)
+  Valid (no crash): 61/68
+  Failed (crashed): 7/68
 
-Average score (all scenarios): 0.5280
-Average score (non-zero only): 0.8249
-
-============================================================
-FAILURE ANALYSIS (for scenarios with score = 0)
-============================================================
-
-Total scenarios with score = 0: 36
-
-Multiplicative metric failures:
-  No at-fault collisions: 7 failures
-  Drivable area compliance: 26 failures
-  Driving direction compliance: 3 failures
-  Traffic light compliance: 1 failures
-  Time to collision: 9 failures
-
-============================================================
-SCORE DISTRIBUTION
-============================================================
-
-Min score: 0.0000
-Max score: 1.0000
-Median score: 0.7864
-25th percentile: 0.0000
-75th percentile: 0.8571
-
-============================================================
-
-sim2drive
-============================================================
-PDM SCORE EVALUATION SUMMARY
-============================================================
-
-Results file: /fs/nexus-projects/sim2real/aliu/navsim/exp/bash/sim2drive/2025.11.27.16.20.51.csv
-
-Total scenarios evaluated: 100
-Valid scenarios (no crashes): 100
-Failed scenarios (crashed): 0
-
-Scenarios with score > 0: 76
-Scenarios with score = 0: 24
-
-Average score (all scenarios): 0.5936
-Average score (non-zero only): 0.7810
-
-============================================================
-FAILURE ANALYSIS (for scenarios with score = 0)
-============================================================
-
-Total scenarios with score = 0: 24
-
-Multiplicative metric failures:
-  No at-fault collisions: 8 failures
-  Drivable area compliance: 17 failures
-  Driving direction compliance: 0 failures
-  Traffic light compliance: 0 failures
-  Time to collision: 9 failures
-
-============================================================
-SCORE DISTRIBUTION
-============================================================
-
-Min score: 0.0000
-Max score: 1.0000
-Median score: 0.7702
-25th percentile: 0.2568
-75th percentile: 0.8433
-
-============================================================
+================================================================================
 """

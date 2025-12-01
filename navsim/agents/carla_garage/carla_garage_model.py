@@ -1,6 +1,7 @@
 """
 The main model structure
 """
+from typing import Dict
 import navsim.agents.carla_garage.transfuser_utils as t_u
 from navsim.agents.carla_garage.focal_loss import FocalLoss
 import numpy as np
@@ -25,9 +26,10 @@ class LidarCenterNet(nn.Module):
   The main model class. It can run all model configurations.
   """
 
-  def __init__(self, config):
+  def __init__(self, config, trajectory_sampling=None):
     super().__init__()
     self.config = config
+    self._trajectory_sampling = trajectory_sampling
     self.lateral_pid_controller = LateralPIDController(self.config)
 
     self.speed_histogram = []
@@ -280,11 +282,48 @@ class LidarCenterNet(nn.Module):
     if self.config.tp_attention:
       nn.init.uniform_(self.tp_pos_embed)
 
-  def forward(self, rgb, lidar_bev, target_point, ego_vel, command, target_point_next=None):
-    bs = rgb.shape[0]
-    if self.config.two_tp_input:
-      target_point = torch.cat((target_point, target_point_next), axis=1)
+  def forward(self, features: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+    # Unpack features dictionary to match LidarCenterNet.forward() signature
+    rgb = features["camera_feature"].unsqueeze(0) if features["camera_feature"].dim() == 3 else features["camera_feature"]
 
+    # Handle latent mode (camera-only) like transfuser does
+    if self.config.latent:
+        lidar_bev = None
+    else:
+        lidar_bev = features["lidar_feature"].unsqueeze(0) if features["lidar_feature"].dim() == 3 else features["lidar_feature"]
+
+    status = features["status_feature"]
+
+    # status_feature is concatenation of [driving_command (1D), ego_velocity (2D), ego_acceleration (2D)]
+    # Total: 5D
+    if status.dim() == 1:
+        driving_cmd = status[0].long()  # scalar command index
+        ego_velocity_2d = status[1:3]  # 2D velocity vector
+    else:
+        driving_cmd = status[:, 0].long()  # (batch,) command indices
+        ego_velocity_2d = status[:, 1:3]  # (batch, 2) velocity vectors
+
+    # Convert 2D velocity to scalar speed
+    ego_vel = torch.norm(ego_velocity_2d, dim=-1, keepdim=True)  # (batch, 1) or (1,)
+    if ego_vel.dim() == 0:
+        ego_vel = ego_vel.unsqueeze(0).unsqueeze(0)
+    elif ego_vel.dim() == 1:
+        ego_vel = ego_vel.unsqueeze(0)
+
+    # One-hot encode the driving command (assuming 6 classes: VOID, LEFT, RIGHT, STRAIGHT, LANEFOLLOW, CHANGELANELEFT, CHANGELANERIGHT)
+    # But nuPlan uses 4 classes, so let's use 6 to match CARLA
+    num_commands = 6
+    command = torch.nn.functional.one_hot(driving_cmd, num_classes=num_commands).float()
+    if command.dim() == 1:
+        command = command.unsqueeze(0)
+
+    # TODO: Compute actual target_point from route/waypoints
+    # For now, use a dummy target point (straight ahead)
+    batch_size = rgb.shape[0]
+    target_point = torch.zeros((batch_size, 2), device=rgb.device, dtype=rgb.dtype)
+    target_point[:, 0] = 10.0  # 10 meters ahead in x direction
+
+    bs = rgb.shape[0]
     if self.config.backbone == 'transFuser' or self.config.backbone == 'transFuser_dinov2':
       bev_feature_grid, fused_features, image_feature_grid = self.backbone(rgb, lidar_bev)
     elif self.config.backbone == 'aim':
@@ -406,9 +445,47 @@ class LidarCenterNet(nn.Module):
     pred_bounding_box = None
     if self.config.detect_boxes:
       pred_bounding_box = self.head(bev_feature_grid)
+    
+    # Convert to expected dictionary format
+    # Since use_wp_gru=False, pred_wp is None. Use pred_checkpoint as trajectory.
+    trajectory = pred_checkpoint if pred_checkpoint is not None else pred_wp
 
-    return pred_wp, pred_target_speed, pred_checkpoint, pred_semantic, pred_bev_semantic, pred_depth, \
-      pred_bounding_box, attention_weights, pred_wp_1, selected_path
+    # Ensure trajectory matches the expected number of poses from trajectory_sampling
+    # Model predicts predict_checkpoint_len=10, but trajectory_sampling expects num_poses=8
+    if self._trajectory_sampling is not None:
+        num_expected_poses = self._trajectory_sampling.num_poses
+        if trajectory is not None and trajectory.shape[1] != num_expected_poses:
+            # Slice to match expected number of poses
+            trajectory = trajectory[:, :num_expected_poses, :]
+
+    # Add heading dimension to trajectory (model outputs only x, y)
+    # Compute heading from consecutive waypoint positions
+    if trajectory is not None and trajectory.shape[-1] == 2:
+        batch_size = trajectory.shape[0]
+        num_poses = trajectory.shape[1]
+
+        # Compute heading from position differences
+        # For each waypoint, compute heading as arctan2(dy, dx) to next waypoint
+        headings = torch.zeros((batch_size, num_poses, 1), device=trajectory.device, dtype=trajectory.dtype)
+
+        # Compute headings from consecutive position differences
+        for i in range(num_poses - 1):
+            dx = trajectory[:, i + 1, 0] - trajectory[:, i, 0]
+            dy = trajectory[:, i + 1, 1] - trajectory[:, i, 1]
+            headings[:, i, 0] = torch.atan2(dy, dx)
+
+        # For the last waypoint, use the same heading as the second-to-last
+        headings[:, -1, 0] = headings[:, -2, 0]
+
+        # Concatenate (x, y, heading)
+        trajectory = torch.cat([trajectory, headings], dim=-1)
+
+    predictions = {
+        "trajectory": trajectory,
+        "target_speed": pred_target_speed,
+    }
+
+    return predictions
 
   def compute_loss(self, pred_wp, pred_target_speed, pred_checkpoint, pred_semantic, pred_bev_semantic, pred_depth,
                    pred_bounding_box, pred_wp_1, selected_path, waypoint_label, target_speed_label, checkpoint_label,

@@ -14,9 +14,7 @@ import copy
 
 
 class TransfuserBackbone(nn.Module):
-  """
-    Multi-scale Fusion Transformer for image + LiDAR feature fusion
-    """
+  """Multi-scale Fusion Transformer for image + LiDAR feature fusion."""
 
   def __init__(self, config):
     super().__init__()
@@ -148,7 +146,20 @@ class TransfuserBackbone(nn.Module):
     else:
       image_features = image
 
-    if self.lidar_video:
+    # Handle latent mode (camera-only) like transfuser does
+    if self.config.latent and lidar is None:
+      batch_size = image.shape[0]
+      # Use image features directly without lidar - create dummy lidar features
+      # that will be ignored due to latent mode fusion
+      lidar_features = torch.zeros(
+        batch_size,
+        1 if not self.config.use_ground_plane else 2,
+        self.config.lidar_resolution_height,
+        self.config.lidar_resolution_width,
+        device=image.device,
+        dtype=image.dtype
+      )
+    elif self.lidar_video:
       batch_size = lidar.shape[0]
       lidar_features = lidar.view(batch_size, -1, self.config.lidar_seq_len, self.config.lidar_resolution_height,
                                   self.config.lidar_resolution_width)
